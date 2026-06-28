@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>DriveTranslate</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>DriveTranslate</h1>
+        <div id="status" class="status idle">Ready to listen</div>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab active" data-tab="hebrew">עברית</button>
+        <button class="tab" data-tab="english">English</button>
+    </nav>
+
+    <main>
+        <!-- Hebrew tab -->
+        <section class="tab-content active" id="tab-hebrew">
+            <div class="card">
+                <h2>Current Hebrew</h2>
+                <div id="current-hebrew" class="live-text rtl" dir="rtl">
+                    התחל האזנה כדי לראות תרגום חי
+                </div>
+            </div>
+            <div class="card">
+                <h2>Recent Lines</h2>
+                <div id="history-hebrew" class="history rtl" dir="rtl"></div>
+            </div>
+        </section>
+
+        <!-- English tab -->
+        <section class="tab-content" id="tab-english">
+            <div class="card">
+                <h2>Current English</h2>
+                <div id="current-english" class="live-text">
+                    Start listening to see the live transcript
+                </div>
+            </div>
+            <div class="card">
+                <h2>Recent Lines</h2>
+                <div id="history-english" class="history"></div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <button id="btn-toggle" class="btn-primary">Start</button>
+        <button id="btn-clear" class="btn-secondary">Clear</button>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
