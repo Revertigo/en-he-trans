@@ -71,30 +71,34 @@ enum ListeningStatus: Equatable {
 }
 
 enum MockTranslationEngine {
+    private static let translationMap: [String: String] = [
+        "The story opens on a quiet road just before sunrise.":
+            "הסיפור נפתח על כביש שקט ממש לפני הזריחה.",
+        "You can hear the narrator slow down when the scene becomes tense.":
+            "אפשר לשמוע שהמספר מאט כשהסצנה נעשית מתוחה.",
+        "Sometimes a single unfamiliar phrase changes the meaning of the whole paragraph.":
+            "לפעמים ביטוי אחד לא מוכר משנה את המשמעות של כל הפסקה.",
+        "This mock mode lets us verify the English and Hebrew screens before testing on a real phone.":
+            "מצב הדמיה זה מאפשר לנו לבדוק את המסכים באנגלית ובעברית לפני בדיקה בטלפון אמיתי."
+    ]
+
     static func translate(_ englishText: String) -> String {
-        let tokens = englishText
-            .split(separator: " ")
-            .map(String.init)
+        // Check for exact full-sentence match
+        if let hebrew = translationMap[englishText] {
+            return hebrew
+        }
 
-        guard !tokens.isEmpty else { return "" }
-
-        let transformed = tokens.map { token in
-            switch token.lowercased() {
-            case "the":
-                return "ha"
-            case "and":
-                return "ve"
-            case "you":
-                return "ata"
-            case "book":
-                return "sefer"
-            case "story":
-                return "sipur"
-            default:
-                return token
+        // For partial sentences (word-by-word streaming), find the best matching sentence
+        for (english, hebrew) in translationMap {
+            if english.hasPrefix(englishText) {
+                // Show proportional Hebrew text based on how much English we've seen
+                let progress = Double(englishText.count) / Double(english.count)
+                let hebrewChars = Int(Double(hebrew.count) * progress)
+                let partialHebrew = String(hebrew.prefix(max(1, hebrewChars)))
+                return partialHebrew
             }
         }
 
-        return "[Mock HE] " + transformed.joined(separator: " ")
+        return englishText
     }
 }
