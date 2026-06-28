@@ -152,7 +152,7 @@ async function translate(englishText) {
 }
 
 // ============== Debounced interim translation ==============
-const INTERIM_DEBOUNCE_MS = 500;
+const INTERIM_DEBOUNCE_MS = 300;
 let interimTimer = null;
 let lastInterimRequest = '';
 let interimRequestId = 0;
