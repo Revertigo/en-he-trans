@@ -75,16 +75,19 @@ function initRecognition() {
             }
         }
 
-        // Show interim text live in English tab
+        // Show interim text live in English tab + translate it (debounced)
         if (interimText) {
             currentEnglishText = interimText;
             els.currentEnglish.textContent = interimText;
+            scheduleInterimTranslation(interimText);
         }
 
         // When we get a finalized segment, translate it
         if (finalText.trim()) {
             const segment = finalText.trim();
             els.currentEnglish.textContent = segment;
+            // Cancel any pending interim translation since we have the final
+            cancelInterimTranslation();
             handleFinalSegment(segment);
         }
     };
@@ -145,6 +148,39 @@ async function translate(englishText) {
     } catch (err) {
         console.error('Translation error:', err);
         throw err;
+    }
+}
+
+// ============== Debounced interim translation ==============
+const INTERIM_DEBOUNCE_MS = 500;
+let interimTimer = null;
+let lastInterimRequest = '';
+let interimRequestId = 0;
+
+function scheduleInterimTranslation(text) {
+    cancelInterimTranslation();
+    interimTimer = setTimeout(() => {
+        const trimmed = text.trim();
+        if (!trimmed || trimmed === lastInterimRequest) return;
+        lastInterimRequest = trimmed;
+
+        const myId = ++interimRequestId;
+        translate(trimmed)
+            .then(hebrew => {
+                // Only update if this is still the most recent interim request
+                // (avoid flicker from out-of-order responses)
+                if (myId === interimRequestId) {
+                    els.currentHebrew.textContent = hebrew;
+                }
+            })
+            .catch(() => { /* ignore interim errors silently */ });
+    }, INTERIM_DEBOUNCE_MS);
+}
+
+function cancelInterimTranslation() {
+    if (interimTimer) {
+        clearTimeout(interimTimer);
+        interimTimer = null;
     }
 }
 
