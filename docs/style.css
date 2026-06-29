@@ -26,6 +26,18 @@ header h1 {
     margin-bottom: 6px;
 }
 
+.version {
+    font-size: 12px;
+    color: #888;
+    font-weight: 400;
+    vertical-align: middle;
+    margin-left: 6px;
+    padding: 2px 6px;
+    background: #0f3460;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+}
+
 .status {
     font-size: 13px;
     color: #aaa;
