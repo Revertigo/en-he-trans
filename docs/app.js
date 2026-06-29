@@ -153,6 +153,7 @@ async function translate(englishText) {
 
 // ============== Debounced interim translation ==============
 const INTERIM_DEBOUNCE_MS = 300;
+const MIN_GROWTH_CHARS = 3;  // skip translation if text grew by less than N chars
 let interimTimer = null;
 let lastInterimRequest = '';
 let interimRequestId = 0;
@@ -161,14 +162,22 @@ function scheduleInterimTranslation(text) {
     cancelInterimTranslation();
     interimTimer = setTimeout(() => {
         const trimmed = text.trim();
-        if (!trimmed || trimmed === lastInterimRequest) return;
+        if (!trimmed) return;
+
+        // Skip if identical to last request
+        if (trimmed === lastInterimRequest) return;
+
+        // Skip if text didn't grow enough (avoid wasteful per-character requests)
+        const growth = trimmed.length - lastInterimRequest.length;
+        if (growth > 0 && growth < MIN_GROWTH_CHARS && trimmed.startsWith(lastInterimRequest)) {
+            return;
+        }
+
         lastInterimRequest = trimmed;
 
         const myId = ++interimRequestId;
         translate(trimmed)
             .then(hebrew => {
-                // Only update if this is still the most recent interim request
-                // (avoid flicker from out-of-order responses)
                 if (myId === interimRequestId) {
                     els.currentHebrew.textContent = hebrew;
                 }
@@ -186,6 +195,9 @@ function cancelInterimTranslation() {
 
 // ============== Handle a finalized speech segment ==============
 async function handleFinalSegment(englishSegment) {
+    // Reset interim tracking so next sentence starts fresh
+    lastInterimRequest = '';
+
     // Show "translating" indicator immediately
     els.currentHebrew.textContent = '...';
 
