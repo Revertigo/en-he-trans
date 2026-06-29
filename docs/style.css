@@ -107,6 +107,16 @@ main {
     word-wrap: break-word;
 }
 
+.current-line {
+    padding: 6px 0;
+    border-bottom: 1px dashed #0f3460;
+}
+
+.current-line:last-child {
+    border-bottom: none;
+    color: #0f9;
+}
+
 .live-text.rtl {
     text-align: right;
     font-family: 'SF Hebrew', 'Arial Hebrew', sans-serif;

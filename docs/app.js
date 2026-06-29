@@ -3,12 +3,19 @@
 
 const TRANSLATE_WORKER_URL = 'https://en-he-translator.dekel241.workers.dev';
 const MAX_HISTORY = 12;
+const CURRENT_WINDOW_SIZE = 3;  // max lines shown in the "current" card
 
 // ============== State ==============
 let recognition = null;
 let isListening = false;
 let isStoppingIntentionally = false;
-let currentEnglishText = '';
+// Sliding window of recent finalized sentences (oldest first, newest last).
+// englishWindow[i] corresponds to hebrewWindow[i].
+let englishWindow = [];
+let hebrewWindow = [];
+// Interim (in-progress) sentence — shown as the bottom line, gets replaced when finalized.
+let interimEnglish = '';
+let interimHebrew = '';
 let historySegments = [];  // {english, hebrew}
 const translationCache = new Map();
 
@@ -75,18 +82,16 @@ function initRecognition() {
             }
         }
 
-        // Show interim text live in English tab + translate it (debounced)
+        // Interim text occupies the bottom line of the current window until finalized.
         if (interimText) {
-            currentEnglishText = interimText;
-            els.currentEnglish.textContent = interimText;
+            interimEnglish = interimText;
+            renderCurrent();
             scheduleInterimTranslation(interimText);
         }
 
-        // When we get a finalized segment, translate it
+        // Final segment: append to sliding window, push oldest to history if full.
         if (finalText.trim()) {
             const segment = finalText.trim();
-            els.currentEnglish.textContent = segment;
-            // Cancel any pending interim translation since we have the final
             cancelInterimTranslation();
             handleFinalSegment(segment);
         }
@@ -167,10 +172,9 @@ function scheduleInterimTranslation(text) {
         const myId = ++interimRequestId;
         translate(trimmed)
             .then(hebrew => {
-                // Only update if this is still the most recent interim request
-                // (avoid flicker from out-of-order responses)
                 if (myId === interimRequestId) {
-                    els.currentHebrew.textContent = hebrew;
+                    interimHebrew = hebrew;
+                    renderCurrent();
                 }
             })
             .catch(() => { /* ignore interim errors silently */ });
@@ -186,26 +190,72 @@ function cancelInterimTranslation() {
 
 // ============== Handle a finalized speech segment ==============
 async function handleFinalSegment(englishSegment) {
-    // Show "translating" indicator immediately
-    els.currentHebrew.textContent = '...';
+    // Show the new sentence in the bottom slot as interim with a "translating" placeholder.
+    interimEnglish = englishSegment;
+    interimHebrew = '...';
+    renderCurrent();
 
     try {
         const hebrew = await translate(englishSegment);
-        els.currentHebrew.textContent = hebrew;
 
-        // Add to history
-        historySegments.unshift({ english: englishSegment, hebrew });
-        if (historySegments.length > MAX_HISTORY) {
-            historySegments = historySegments.slice(0, MAX_HISTORY);
+        // Append the finalized pair to the sliding window
+        englishWindow.push(englishSegment);
+        hebrewWindow.push(hebrew);
+
+        // If window exceeded capacity, push oldest into history
+        while (englishWindow.length > CURRENT_WINDOW_SIZE) {
+            const evictedEn = englishWindow.shift();
+            const evictedHe = hebrewWindow.shift();
+            historySegments.unshift({ english: evictedEn, hebrew: evictedHe });
+            if (historySegments.length > MAX_HISTORY) {
+                historySegments = historySegments.slice(0, MAX_HISTORY);
+            }
         }
+
+        // Clear interim — the sentence is now in the window
+        interimEnglish = '';
+        interimHebrew = '';
+
+        renderCurrent();
         renderHistory();
     } catch (err) {
-        els.currentHebrew.textContent = '[Translation error]';
+        interimHebrew = '[Translation error]';
+        renderCurrent();
         setStatus(`Translation failed: ${err.message}`, 'error');
         setTimeout(() => {
             if (isListening) setStatus('Listening...', 'listening');
         }, 3000);
     }
+}
+
+// ============== Render current (sliding window of up to 3 lines) ==============
+function renderCurrent() {
+    const englishLines = [...englishWindow];
+    const hebrewLines = [...hebrewWindow];
+
+    if (interimEnglish) {
+        // Option Y: interim replaces the bottom slot (max 3 visible lines).
+        if (englishLines.length >= CURRENT_WINDOW_SIZE) {
+            englishLines[CURRENT_WINDOW_SIZE - 1] = interimEnglish;
+            hebrewLines[CURRENT_WINDOW_SIZE - 1] = interimHebrew || '...';
+        } else {
+            englishLines.push(interimEnglish);
+            hebrewLines.push(interimHebrew || '...');
+        }
+    }
+
+    if (englishLines.length === 0) {
+        els.currentEnglish.textContent = 'Start listening to see the live transcript';
+        els.currentHebrew.textContent = 'התחל האזנה כדי לראות תרגום חי';
+        return;
+    }
+
+    els.currentEnglish.innerHTML = englishLines
+        .map(line => `<div class="current-line">${escapeHtml(line)}</div>`)
+        .join('');
+    els.currentHebrew.innerHTML = hebrewLines
+        .map(line => `<div class="current-line">${escapeHtml(line)}</div>`)
+        .join('');
 }
 
 // ============== Render history ==============
@@ -245,9 +295,12 @@ els.btnToggle.addEventListener('click', async () => {
 
 els.btnClear.addEventListener('click', () => {
     historySegments = [];
+    englishWindow = [];
+    hebrewWindow = [];
+    interimEnglish = '';
+    interimHebrew = '';
+    renderCurrent();
     renderHistory();
-    els.currentEnglish.textContent = 'Start listening to see the live transcript';
-    els.currentHebrew.textContent = 'התחל האזנה כדי לראות תרגום חי';
 });
 
 // ============== Initialize ==============
