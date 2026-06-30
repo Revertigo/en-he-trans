@@ -2,8 +2,15 @@
 // Uses Web Speech API for EN speech-to-text, calls Cloudflare Worker for EN→HE translation.
 
 const TRANSLATE_WORKER_URL = 'https://en-he-translator.dekel241.workers.dev';
+const LOG_ENDPOINT = TRANSLATE_WORKER_URL + '/log';
 const MAX_HISTORY = 12;
 const CURRENT_WINDOW_SIZE = 3;  // max lines shown in the "current" card
+
+// ============== Feature flags ==============
+// Toggle this true/false to show/hide the on-screen debug overlay.
+// When false, dbg() becomes a no-op (no performance impact).
+const DEBUG_MODE = true;
+const DEBUG_BUFFER_SIZE = 200;  // entries kept for "Send Report"
 
 // ============== State ==============
 let recognition = null;
@@ -30,7 +37,62 @@ const els = {
     historyHebrew: document.getElementById('history-hebrew'),
     tabs: document.querySelectorAll('.tab'),
     tabContents: document.querySelectorAll('.tab-content'),
+    debugBox: document.getElementById('debug-box'),
+    btnSendReport: document.getElementById('btn-send-report'),
 };
+
+// ============== Feature flag: show/hide debug UI ==============
+if (!DEBUG_MODE) {
+    if (els.debugBox) els.debugBox.style.display = 'none';
+    if (els.btnSendReport) els.btnSendReport.style.display = 'none';
+} else {
+    if (els.btnSendReport) {
+        els.btnSendReport.addEventListener('click', sendDebugReport);
+    }
+}
+
+// ============== Debug helper ==============
+// Maintains a rolling buffer for "Send Report". Only renders the last few lines
+// in the on-screen overlay (when DEBUG_MODE is true).
+const debugBuffer = [];      // full history for reports
+const ON_SCREEN_LINES = 8;
+function dbg(msg) {
+    if (!DEBUG_MODE) return;
+    const t = new Date().toLocaleTimeString('he-IL', { hour12: false });
+    const line = `[${t}] ${msg}`;
+    debugBuffer.push(line);
+    if (debugBuffer.length > DEBUG_BUFFER_SIZE) debugBuffer.shift();
+    if (els.debugBox) {
+        const tail = debugBuffer.slice(-ON_SCREEN_LINES).join('\n');
+        els.debugBox.textContent = tail;
+    }
+    console.log(msg);
+}
+
+async function sendDebugReport() {
+    if (!debugBuffer.length) {
+        if (els.debugBox) els.debugBox.textContent = '(no log entries to send)';
+        return;
+    }
+    const userAgent = navigator.userAgent;
+    const version = document.querySelector('.version')?.textContent || 'unknown';
+    const header = `=== Report ${new Date().toISOString()} ===\nVersion: ${version}\nUA: ${userAgent}\n--- LOG ---\n`;
+    const body = debugBuffer.join('\n');
+    try {
+        const resp = await fetch(LOG_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: header + body }),
+        });
+        if (resp.ok) {
+            dbg('REPORT SENT ✓');
+        } else {
+            dbg('REPORT FAIL ' + resp.status);
+        }
+    } catch (e) {
+        dbg('REPORT ERROR ' + e.message);
+    }
+}
 
 // ============== Tab switching ==============
 els.tabs.forEach(tab => {
@@ -92,6 +154,7 @@ function initRecognition() {
         // Final segment: append to sliding window, push oldest to history if full.
         if (finalText.trim()) {
             const segment = finalText.trim();
+            dbg(`FINAL: "${segment.slice(0, 30)}"`);
             cancelInterimTranslation();
             handleFinalSegment(segment);
         }
@@ -201,6 +264,7 @@ async function handleFinalSegment(englishSegment) {
         // Append the finalized pair to the sliding window
         englishWindow.push(englishSegment);
         hebrewWindow.push(hebrew);
+        dbg(`PUSH win=${englishWindow.length} hist=${historySegments.length}`);
 
         // If window exceeded capacity, push oldest into history
         while (englishWindow.length > CURRENT_WINDOW_SIZE) {
@@ -210,6 +274,7 @@ async function handleFinalSegment(englishSegment) {
             if (historySegments.length > MAX_HISTORY) {
                 historySegments = historySegments.slice(0, MAX_HISTORY);
             }
+            dbg(`EVICT to hist. win=${englishWindow.length} hist=${historySegments.length}`);
         }
 
         // Clear interim — the sentence is now in the window

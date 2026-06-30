@@ -117,6 +117,44 @@ main {
     color: #0f9;
 }
 
+.debug-box {
+    position: fixed;
+    bottom: 80px;
+    left: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #0f9;
+    font-family: monospace;
+    font-size: 11px;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid #0f9;
+    max-height: 100px;
+    overflow-y: auto;
+    z-index: 9999;
+    white-space: pre-wrap;
+    pointer-events: none;
+}
+
+.btn-debug-report {
+    position: fixed;
+    bottom: 190px;
+    right: 8px;
+    background: #0f3460;
+    color: #0f9;
+    border: 1px solid #0f9;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: monospace;
+    z-index: 9999;
+    cursor: pointer;
+}
+.btn-debug-report:active {
+    background: #0f9;
+    color: #0a0a1a;
+}
+
 .live-text.rtl {
     text-align: right;
     font-family: 'SF Hebrew', 'Arial Hebrew', sans-serif;
