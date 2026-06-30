@@ -6,6 +6,11 @@ const LOG_ENDPOINT = TRANSLATE_WORKER_URL + '/log';
 const MAX_HISTORY = 12;
 const CURRENT_WINDOW_SIZE = 3;  // max lines shown in the "current" card
 
+// Force-finalize logic: some browsers (e.g., Chrome iOS) rarely emit `isFinal`,
+// causing interim text to grow forever. We synthesize finalization ourselves.
+const FORCE_FINALIZE_STABLE_MS = 3000;  // finalize if interim hasn't changed for this long
+const FORCE_FINALIZE_MAX_WORDS = 5;     // or if interim has at least this many words
+
 // ============== Feature flags ==============
 // Toggle this true/false to show/hide the on-screen debug overlay.
 // When false, dbg() becomes a no-op (no performance impact).
@@ -71,8 +76,16 @@ function dbg(msg) {
 
 async function sendDebugReport() {
     if (!debugBuffer.length) {
-        if (els.debugBox) els.debugBox.textContent = '(no log entries to send)';
+        if (els.btnSendReport) {
+            els.btnSendReport.textContent = '(empty)';
+            setTimeout(() => { els.btnSendReport.textContent = '📤 Send Report'; }, 1500);
+        }
         return;
+    }
+    const originalText = '📤 Send Report';
+    if (els.btnSendReport) {
+        els.btnSendReport.disabled = true;
+        els.btnSendReport.textContent = '⏳ Sending...';
     }
     const userAgent = navigator.userAgent;
     const version = document.querySelector('.version')?.textContent || 'unknown';
@@ -86,11 +99,35 @@ async function sendDebugReport() {
         });
         if (resp.ok) {
             dbg('REPORT SENT ✓');
+            if (els.btnSendReport) {
+                els.btnSendReport.textContent = '✓ Sent';
+                els.btnSendReport.style.background = '#0f9';
+                els.btnSendReport.style.color = '#0a0a1a';
+            }
         } else {
             dbg('REPORT FAIL ' + resp.status);
+            if (els.btnSendReport) {
+                els.btnSendReport.textContent = '✗ Failed ' + resp.status;
+                els.btnSendReport.style.background = '#a33';
+                els.btnSendReport.style.color = '#fff';
+            }
         }
     } catch (e) {
         dbg('REPORT ERROR ' + e.message);
+        if (els.btnSendReport) {
+            els.btnSendReport.textContent = '✗ Error';
+            els.btnSendReport.style.background = '#a33';
+            els.btnSendReport.style.color = '#fff';
+        }
+    } finally {
+        if (els.btnSendReport) {
+            setTimeout(() => {
+                els.btnSendReport.textContent = originalText;
+                els.btnSendReport.style.background = '';
+                els.btnSendReport.style.color = '';
+                els.btnSendReport.disabled = false;
+            }, 2000);
+        }
     }
 }
 
@@ -146,16 +183,30 @@ function initRecognition() {
 
         // Interim text occupies the bottom line of the current window until finalized.
         if (interimText) {
-            interimEnglish = interimText;
+            const trimmed = interimText.trim();
+            interimEnglish = trimmed;
             renderCurrent();
-            scheduleInterimTranslation(interimText);
+            scheduleInterimTranslation(trimmed);
+
+            // Force-finalize if interim has grown to N words.
+            const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+            if (wordCount >= FORCE_FINALIZE_MAX_WORDS) {
+                dbg(`FORCE-FIN (words=${wordCount})`);
+                cancelInterimTranslation();
+                cancelStabilityTimer();
+                handleFinalSegment(trimmed);
+            } else {
+                // Reset the stability timer — interim is still changing.
+                scheduleStabilityFinalize(trimmed);
+            }
         }
 
-        // Final segment: append to sliding window, push oldest to history if full.
+        // Final segment from the browser itself.
         if (finalText.trim()) {
             const segment = finalText.trim();
             dbg(`FINAL: "${segment.slice(0, 30)}"`);
             cancelInterimTranslation();
+            cancelStabilityTimer();
             handleFinalSegment(segment);
         }
     };
@@ -248,6 +299,25 @@ function cancelInterimTranslation() {
     if (interimTimer) {
         clearTimeout(interimTimer);
         interimTimer = null;
+    }
+}
+
+// ============== Stability-based force finalization ==============
+let stabilityTimer = null;
+function scheduleStabilityFinalize(text) {
+    cancelStabilityTimer();
+    stabilityTimer = setTimeout(() => {
+        if (text && interimEnglish === text) {
+            dbg(`FORCE-FIN (stable ${FORCE_FINALIZE_STABLE_MS}ms)`);
+            cancelInterimTranslation();
+            handleFinalSegment(text);
+        }
+    }, FORCE_FINALIZE_STABLE_MS);
+}
+function cancelStabilityTimer() {
+    if (stabilityTimer) {
+        clearTimeout(stabilityTimer);
+        stabilityTimer = null;
     }
 }
 
@@ -346,6 +416,8 @@ els.btnToggle.addEventListener('click', async () => {
     if (isListening) {
         // Stop
         isStoppingIntentionally = true;
+        cancelInterimTranslation();
+        cancelStabilityTimer();
         recognition.stop();
     } else {
         // Start
