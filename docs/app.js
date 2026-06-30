@@ -28,6 +28,10 @@ let hebrewWindow = [];
 // Interim (in-progress) sentence — shown as the bottom line, gets replaced when finalized.
 let interimEnglish = '';
 let interimHebrew = '';
+// Tracks the portion of cumulative interim text we have already force-finalized.
+// On browsers (like Chrome iOS) that keep interim as a growing cumulative string,
+// we only emit the NEW portion since the last force-finalization.
+let consumedInterimPrefix = '';
 let historySegments = [];  // {english, hebrew}
 const translationCache = new Map();
 
@@ -181,32 +185,40 @@ function initRecognition() {
             }
         }
 
-        // Interim text occupies the bottom line of the current window until finalized.
-        if (interimText) {
-            const trimmed = interimText.trim();
-            interimEnglish = trimmed;
-            renderCurrent();
-            scheduleInterimTranslation(trimmed);
+        // Compute the NEW (unconsumed) portion of the cumulative interim text.
+        // On Chrome iOS the recognizer keeps appending to the same interim transcript
+        // even after our synthetic finalizations.
+        let newInterim = interimText.trim();
+        if (consumedInterimPrefix && newInterim.startsWith(consumedInterimPrefix)) {
+            newInterim = newInterim.slice(consumedInterimPrefix.length).trim();
+        }
 
-            // Force-finalize if interim has grown to N words.
-            const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+        if (newInterim) {
+            interimEnglish = newInterim;
+            renderCurrent();
+            scheduleInterimTranslation(newInterim);
+
+            // Force-finalize once newInterim has at least N words.
+            const wordCount = newInterim.split(/\s+/).filter(Boolean).length;
             if (wordCount >= FORCE_FINALIZE_MAX_WORDS) {
                 dbg(`FORCE-FIN (words=${wordCount})`);
                 cancelInterimTranslation();
                 cancelStabilityTimer();
-                handleFinalSegment(trimmed);
+                // Advance the consumed prefix to include this chunk.
+                consumedInterimPrefix = interimText.trim();
+                handleFinalSegment(newInterim);
             } else {
-                // Reset the stability timer — interim is still changing.
-                scheduleStabilityFinalize(trimmed);
+                scheduleStabilityFinalize(newInterim);
             }
         }
 
-        // Final segment from the browser itself.
+        // Browser-provided final segment: reset interim tracking entirely.
         if (finalText.trim()) {
             const segment = finalText.trim();
             dbg(`FINAL: "${segment.slice(0, 30)}"`);
             cancelInterimTranslation();
             cancelStabilityTimer();
+            consumedInterimPrefix = '';
             handleFinalSegment(segment);
         }
     };
@@ -310,6 +322,8 @@ function scheduleStabilityFinalize(text) {
         if (text && interimEnglish === text) {
             dbg(`FORCE-FIN (stable ${FORCE_FINALIZE_STABLE_MS}ms)`);
             cancelInterimTranslation();
+            // Advance the consumed prefix so the next interim delta excludes this text.
+            consumedInterimPrefix = (consumedInterimPrefix ? consumedInterimPrefix + ' ' : '') + text;
             handleFinalSegment(text);
         }
     }, FORCE_FINALIZE_STABLE_MS);
@@ -436,6 +450,7 @@ els.btnClear.addEventListener('click', () => {
     hebrewWindow = [];
     interimEnglish = '';
     interimHebrew = '';
+    consumedInterimPrefix = '';
     renderCurrent();
     renderHistory();
 });
