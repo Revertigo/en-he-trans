@@ -443,18 +443,63 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ============== Sound effects (Web Audio API) ==============
+let audioCtx = null;
+function getAudioCtx() {
+    if (!audioCtx) {
+        try {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) { return null; }
+    }
+    // Some browsers require user-gesture to resume the context
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+}
+
+function playTone(freq, duration, startOffset = 0, type = 'sine', volume = 0.15) {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    const t0 = ctx.currentTime + startOffset;
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(volume, t0 + 0.01);
+    gain.gain.linearRampToValueAtTime(0, t0 + duration);
+    osc.start(t0);
+    osc.stop(t0 + duration + 0.02);
+}
+
+function playStartSound() {
+    // Pleasant rising chirp: A4 → E5 (two short tones going up)
+    playTone(440, 0.08, 0);
+    playTone(659.25, 0.12, 0.08);
+}
+
+function playStopSound() {
+    // Descending soft thunk: E5 → A4 → low (going down)
+    playTone(659.25, 0.08, 0);
+    playTone(440, 0.10, 0.08);
+    playTone(293.66, 0.14, 0.18);
+}
+
 // ============== Controls ==============
 els.btnToggle.addEventListener('click', async () => {
     if (!recognition && !initRecognition()) return;
 
     if (isListening) {
         // Stop
+        playStopSound();
         isStoppingIntentionally = true;
         cancelInterimTranslation();
         cancelStabilityTimer();
         recognition.stop();
     } else {
         // Start
+        playStartSound();
         try {
             setStatus('Preparing...', 'preparing');
             recognition.start();
