@@ -181,12 +181,18 @@ function initRecognition() {
         isListening = true;
         isStoppingIntentionally = false;
         restartingForFinalize = false;
+        dbg('LIFE: onstart');
         setStatus('Listening...', 'listening');
         els.btnToggle.textContent = 'Stop';
         els.btnToggle.classList.add('listening');
     };
 
     recognition.onresult = (event) => {
+        // Ignore any results that arrive while we're in the middle of a restart.
+        // (Otherwise multiple onresult events fire back-to-back with the same
+        // interim transcript, each triggering its own FORCE-FIN.)
+        if (restartingForFinalize) return;
+
         let interimText = '';
         let finalText = '';
 
@@ -206,16 +212,15 @@ function initRecognition() {
             renderCurrent();
             scheduleInterimTranslation(trimmedInterim);
 
-            // Force-finalize when interim is long enough, by RESTARTING the recognizer.
-            // This cleanly resets its internal interim transcript so we don't have to
-            // track "consumed" prefixes (which is fragile because the recognizer may
-            // also revise/replace its interim mid-stream).
-            const wordCount = trimmedInterim.split(/\s+/).filter(Boolean).length;
-            if (wordCount >= FORCE_FINALIZE_MAX_WORDS) {
-                dbg(`FORCE-FIN (words=${wordCount}) → restart`);
+            // Once interim crosses N words, emit EXACTLY N words as a finalized line.
+            // Then restart the recognizer so the leftover words come back as fresh interim.
+            const words = trimmedInterim.split(/\s+/).filter(Boolean);
+            if (words.length >= FORCE_FINALIZE_MAX_WORDS) {
+                const chunk = words.slice(0, FORCE_FINALIZE_MAX_WORDS).join(' ');
+                dbg(`FORCE-FIN (words=${words.length}, emit=${FORCE_FINALIZE_MAX_WORDS}) → restart`);
                 cancelInterimTranslation();
                 cancelStabilityTimer();
-                handleFinalSegment(trimmedInterim);
+                handleFinalSegment(chunk);
                 restartRecognition();
             } else {
                 scheduleStabilityFinalize(trimmedInterim);
@@ -231,8 +236,18 @@ function initRecognition() {
         }
     };
 
+    // Lifecycle events used only for diagnostic logging (no behavior change).
+    recognition.onaudiostart  = () => dbg('LIFE: onaudiostart');
+    recognition.onaudioend    = () => dbg('LIFE: onaudioend');
+    recognition.onsoundstart  = () => dbg('LIFE: onsoundstart');
+    recognition.onsoundend    = () => dbg('LIFE: onsoundend');
+    recognition.onspeechstart = () => dbg('LIFE: onspeechstart');
+    recognition.onspeechend   = () => dbg('LIFE: onspeechend');
+    recognition.onnomatch     = () => dbg('LIFE: onnomatch');
+
     recognition.onerror = (event) => {
         console.error('Recognition error:', event.error);
+        dbg(`LIFE: onerror ${event.error}`);
         if (event.error === 'no-speech') {
             // Common, ignore — recognition will auto-restart via onend
             return;
@@ -242,12 +257,13 @@ function initRecognition() {
 
     recognition.onend = () => {
         isListening = false;
+        dbg(`LIFE: onend (intentional=${isStoppingIntentionally})`);
         // Safari auto-stops recognition after a while. Auto-restart unless user pressed Stop.
         if (!isStoppingIntentionally) {
             try {
                 recognition.start();
             } catch (e) {
-                // Already running or other error
+                dbg(`LIFE: restart failed ${e.message}`);
                 setStatus('Stopped', 'idle');
                 els.btnToggle.textContent = 'Start';
                 els.btnToggle.classList.remove('listening');
