@@ -28,10 +28,6 @@ let hebrewWindow = [];
 // Interim (in-progress) sentence — shown as the bottom line, gets replaced when finalized.
 let interimEnglish = '';
 let interimHebrew = '';
-// Tracks the portion of cumulative interim text we have already force-finalized.
-// On browsers (like Chrome iOS) that keep interim as a growing cumulative string,
-// we only emit the NEW portion since the last force-finalization.
-let consumedInterimPrefix = '';
 let historySegments = [];  // {english, hebrew}
 const translationCache = new Map();
 
@@ -184,6 +180,7 @@ function initRecognition() {
     recognition.onstart = () => {
         isListening = true;
         isStoppingIntentionally = false;
+        restartingForFinalize = false;
         setStatus('Listening...', 'listening');
         els.btnToggle.textContent = 'Stop';
         els.btnToggle.classList.add('listening');
@@ -202,40 +199,34 @@ function initRecognition() {
             }
         }
 
-        // Compute the NEW (unconsumed) portion of the cumulative interim text.
-        // On Chrome iOS the recognizer keeps appending to the same interim transcript
-        // even after our synthetic finalizations.
-        let newInterim = interimText.trim();
-        if (consumedInterimPrefix && newInterim.startsWith(consumedInterimPrefix)) {
-            newInterim = newInterim.slice(consumedInterimPrefix.length).trim();
-        }
+        const trimmedInterim = interimText.trim();
 
-        if (newInterim) {
-            interimEnglish = newInterim;
+        if (trimmedInterim) {
+            interimEnglish = trimmedInterim;
             renderCurrent();
-            scheduleInterimTranslation(newInterim);
+            scheduleInterimTranslation(trimmedInterim);
 
-            // Force-finalize once newInterim has at least N words.
-            const wordCount = newInterim.split(/\s+/).filter(Boolean).length;
+            // Force-finalize when interim is long enough, by RESTARTING the recognizer.
+            // This cleanly resets its internal interim transcript so we don't have to
+            // track "consumed" prefixes (which is fragile because the recognizer may
+            // also revise/replace its interim mid-stream).
+            const wordCount = trimmedInterim.split(/\s+/).filter(Boolean).length;
             if (wordCount >= FORCE_FINALIZE_MAX_WORDS) {
-                dbg(`FORCE-FIN (words=${wordCount})`);
+                dbg(`FORCE-FIN (words=${wordCount}) → restart`);
                 cancelInterimTranslation();
                 cancelStabilityTimer();
-                // Advance the consumed prefix to include this chunk.
-                consumedInterimPrefix = interimText.trim();
-                handleFinalSegment(newInterim);
+                handleFinalSegment(trimmedInterim);
+                restartRecognition();
             } else {
-                scheduleStabilityFinalize(newInterim);
+                scheduleStabilityFinalize(trimmedInterim);
             }
         }
 
-        // Browser-provided final segment: reset interim tracking entirely.
         if (finalText.trim()) {
             const segment = finalText.trim();
             dbg(`FINAL: "${segment.slice(0, 30)}"`);
             cancelInterimTranslation();
             cancelStabilityTimer();
-            consumedInterimPrefix = '';
             handleFinalSegment(segment);
         }
     };
@@ -337,11 +328,10 @@ function scheduleStabilityFinalize(text) {
     cancelStabilityTimer();
     stabilityTimer = setTimeout(() => {
         if (text && interimEnglish === text) {
-            dbg(`FORCE-FIN (stable ${FORCE_FINALIZE_STABLE_MS}ms)`);
+            dbg(`FORCE-FIN (stable ${FORCE_FINALIZE_STABLE_MS}ms) → restart`);
             cancelInterimTranslation();
-            // Advance the consumed prefix so the next interim delta excludes this text.
-            consumedInterimPrefix = (consumedInterimPrefix ? consumedInterimPrefix + ' ' : '') + text;
             handleFinalSegment(text);
+            restartRecognition();
         }
     }, FORCE_FINALIZE_STABLE_MS);
 }
@@ -350,6 +340,19 @@ function cancelStabilityTimer() {
         clearTimeout(stabilityTimer);
         stabilityTimer = null;
     }
+}
+
+// Stops the recognizer and lets onend auto-restart it. This clears the
+// recognizer's internal interim transcript so we don't have to track
+// consumed prefixes ourselves.
+let restartingForFinalize = false;
+function restartRecognition() {
+    if (!recognition || !isListening || restartingForFinalize) return;
+    restartingForFinalize = true;
+    try {
+        recognition.stop();
+    } catch (e) { /* ignore */ }
+    // restartingForFinalize will be cleared on next onstart
 }
 
 // ============== Handle a finalized speech segment ==============
@@ -467,7 +470,6 @@ els.btnClear.addEventListener('click', () => {
     hebrewWindow = [];
     interimEnglish = '';
     interimHebrew = '';
-    consumedInterimPrefix = '';
     renderCurrent();
     renderHistory();
 });
