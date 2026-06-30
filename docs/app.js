@@ -79,7 +79,7 @@ function dbg(msg) {
 }
 
 async function sendDebugReport() {
-    if (!debugBuffer.length) {
+    if (!debugBuffer.length && englishWindow.length === 0 && historySegments.length === 0) {
         if (els.btnSendReport) {
             els.btnSendReport.textContent = '(empty)';
             setTimeout(() => { els.btnSendReport.textContent = '📤 Send Report'; }, 1500);
@@ -93,13 +93,30 @@ async function sendDebugReport() {
     }
     const userAgent = navigator.userAgent;
     const version = document.querySelector('.version')?.textContent || 'unknown';
-    const header = `=== Report ${new Date().toISOString()} ===\nVersion: ${version}\nUA: ${userAgent}\n--- LOG ---\n`;
-    const body = debugBuffer.join('\n');
+
+    // Snapshot of what the user currently sees on screen.
+    const windowSnapshot = englishWindow.map((en, i) => {
+        const he = hebrewWindow[i] || '';
+        return `  [${i}] EN: ${en}\n      HE: ${he}`;
+    }).join('\n');
+    const interimSnapshot = interimEnglish
+        ? `  [interim] EN: ${interimEnglish}\n            HE: ${interimHebrew || '...'}`
+        : '  (no interim)';
+    const historySnapshot = historySegments.map((s, i) =>
+        `  [${i}] EN: ${s.english}\n      HE: ${s.hebrew}`
+    ).join('\n');
+
+    const header = `=== Report ${new Date().toISOString()} ===\nVersion: ${version}\nUA: ${userAgent}\n`;
+    const part1 = `--- EVENT LOG (${debugBuffer.length} entries) ---\n${debugBuffer.join('\n') || '(empty)'}\n`;
+    const part2 = `--- CURRENT WINDOW (${englishWindow.length}/${CURRENT_WINDOW_SIZE}) ---\n${windowSnapshot || '(empty)'}\n${interimSnapshot}\n`;
+    const part3 = `--- HISTORY (${historySegments.length}) ---\n${historySnapshot || '(empty)'}\n`;
+    const fullMessage = header + part1 + part2 + part3;
+
     try {
         const resp = await fetch(LOG_ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: header + body }),
+            body: JSON.stringify({ message: fullMessage }),
         });
         if (resp.ok) {
             dbg('REPORT SENT ✓');
