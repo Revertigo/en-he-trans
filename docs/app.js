@@ -11,6 +11,11 @@ const CURRENT_WINDOW_SIZE = 3;  // max lines shown in the "current" card
 const FORCE_FINALIZE_STABLE_MS = 3000;  // finalize if interim hasn't changed for this long
 const FORCE_FINALIZE_MAX_WORDS = 5;     // or if interim has at least this many words
 
+// Zombie-detection watchdog: after the recognizer starts, we expect SOME activity
+// (onresult, onspeechstart, or onspeechend) within this window. If not, the
+// recognizer likely entered a silent-stall state — we log it (no auto-recovery yet).
+const ZOMBIE_WATCHDOG_MS = 4000;
+
 // ============== Feature flags ==============
 // Toggle this true/false to show/hide the on-screen debug overlay.
 // When false, dbg() becomes a no-op (no performance impact).
@@ -182,12 +187,16 @@ function initRecognition() {
         isStoppingIntentionally = false;
         restartingForFinalize = false;
         dbg('LIFE: onstart');
+        armZombieWatchdog('onstart');
         setStatus('Listening...', 'listening');
         els.btnToggle.textContent = 'Stop';
         els.btnToggle.classList.add('listening');
     };
 
     recognition.onresult = (event) => {
+        // Any result event is a heartbeat — the recognizer is alive.
+        armZombieWatchdog('onresult');
+
         // Ignore any results that arrive while we're in the middle of a restart.
         // (Otherwise multiple onresult events fire back-to-back with the same
         // interim transcript, each triggering its own FORCE-FIN.)
@@ -237,12 +246,12 @@ function initRecognition() {
     };
 
     // Lifecycle events used only for diagnostic logging (no behavior change).
-    recognition.onaudiostart  = () => dbg('LIFE: onaudiostart');
+    recognition.onaudiostart  = () => { dbg('LIFE: onaudiostart'); armZombieWatchdog('onaudiostart'); };
     recognition.onaudioend    = () => dbg('LIFE: onaudioend');
-    recognition.onsoundstart  = () => dbg('LIFE: onsoundstart');
+    recognition.onsoundstart  = () => { dbg('LIFE: onsoundstart'); armZombieWatchdog('onsoundstart'); };
     recognition.onsoundend    = () => dbg('LIFE: onsoundend');
-    recognition.onspeechstart = () => dbg('LIFE: onspeechstart');
-    recognition.onspeechend   = () => dbg('LIFE: onspeechend');
+    recognition.onspeechstart = () => { dbg('LIFE: onspeechstart'); armZombieWatchdog('onspeechstart'); };
+    recognition.onspeechend   = () => { dbg('LIFE: onspeechend'); armZombieWatchdog('onspeechend'); };
     recognition.onnomatch     = () => dbg('LIFE: onnomatch');
 
     recognition.onerror = (event) => {
@@ -257,6 +266,7 @@ function initRecognition() {
 
     recognition.onend = () => {
         isListening = false;
+        cancelZombieWatchdog();
         dbg(`LIFE: onend (intentional=${isStoppingIntentionally})`);
         // Safari auto-stops recognition after a while. Auto-restart unless user pressed Stop.
         if (!isStoppingIntentionally) {
@@ -355,6 +365,23 @@ function cancelStabilityTimer() {
     if (stabilityTimer) {
         clearTimeout(stabilityTimer);
         stabilityTimer = null;
+    }
+}
+
+// ============== Zombie-recognizer watchdog ==============
+let zombieTimer = null;
+function armZombieWatchdog(reason) {
+    cancelZombieWatchdog();
+    zombieTimer = setTimeout(() => {
+        if (isListening) {
+            dbg(`ZOMBIE? no activity in ${ZOMBIE_WATCHDOG_MS}ms after ${reason}`);
+        }
+    }, ZOMBIE_WATCHDOG_MS);
+}
+function cancelZombieWatchdog() {
+    if (zombieTimer) {
+        clearTimeout(zombieTimer);
+        zombieTimer = null;
     }
 }
 
