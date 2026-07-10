@@ -7,11 +7,6 @@ const WARMUP_ENDPOINT = TRANSLATE_WORKER_URL + '/warmup';
 const MAX_HISTORY = 12;
 const CURRENT_WINDOW_SIZE = 3;  // max lines shown in the "current" card
 
-// Force-finalize logic: some browsers (e.g., Chrome iOS) rarely emit `isFinal`,
-// causing interim text to grow forever. We synthesize finalization ourselves.
-const FORCE_FINALIZE_STABLE_MS = 3000;  // finalize if interim hasn't changed for this long
-const FORCE_FINALIZE_MAX_WORDS = 5;     // or if interim has at least this many words
-
 // ============== Feature flags ==============
 // Toggle this true/false to show/hide the on-screen debug overlay.
 // When false, dbg() becomes a no-op (no performance impact).
@@ -181,7 +176,6 @@ function initRecognition() {
     recognition.onstart = () => {
         isListening = true;
         isStoppingIntentionally = false;
-        restartingForFinalize = false;
         dbg('LIFE: onstart');
         setStatus('Listening...', 'listening');
         els.btnToggle.textContent = 'Stop';
@@ -189,11 +183,6 @@ function initRecognition() {
     };
 
     recognition.onresult = (event) => {
-        // Ignore any results that arrive while we're in the middle of a restart.
-        // (Otherwise multiple onresult events fire back-to-back with the same
-        // interim transcript, each triggering its own FORCE-FIN.)
-        if (restartingForFinalize) return;
-
         let interimText = '';
         let finalText = '';
 
@@ -206,33 +195,21 @@ function initRecognition() {
             }
         }
 
+        // Show interim live in the bottom slot and translate it (debounced).
         const trimmedInterim = interimText.trim();
-
         if (trimmedInterim) {
             interimEnglish = trimmedInterim;
             renderCurrent();
             scheduleInterimTranslation(trimmedInterim);
-
-            // Once interim crosses N words, emit EXACTLY N words as a finalized line.
-            // Then restart the recognizer so the leftover words come back as fresh interim.
-            const words = trimmedInterim.split(/\s+/).filter(Boolean);
-            if (words.length >= FORCE_FINALIZE_MAX_WORDS) {
-                const chunk = words.slice(0, FORCE_FINALIZE_MAX_WORDS).join(' ');
-                dbg(`FORCE-FIN (words=${words.length}, emit=${FORCE_FINALIZE_MAX_WORDS}) → restart`);
-                cancelInterimTranslation();
-                cancelStabilityTimer();
-                handleFinalSegment(chunk);
-                restartRecognition();
-            } else {
-                scheduleStabilityFinalize(trimmedInterim);
-            }
         }
 
+        // When the browser finalizes a segment, commit it to the sliding window.
+        // We rely purely on the browser's own isFinal — no forced restart, so the
+        // microphone never stops and no audio is lost.
         if (finalText.trim()) {
             const segment = finalText.trim();
             dbg(`FINAL: "${segment.slice(0, 30)}"`);
             cancelInterimTranslation();
-            cancelStabilityTimer();
             handleFinalSegment(segment);
         }
     };
@@ -337,39 +314,6 @@ function cancelInterimTranslation() {
         clearTimeout(interimTimer);
         interimTimer = null;
     }
-}
-
-// ============== Stability-based force finalization ==============
-let stabilityTimer = null;
-function scheduleStabilityFinalize(text) {
-    cancelStabilityTimer();
-    stabilityTimer = setTimeout(() => {
-        if (text && interimEnglish === text) {
-            dbg(`FORCE-FIN (stable ${FORCE_FINALIZE_STABLE_MS}ms) → restart`);
-            cancelInterimTranslation();
-            handleFinalSegment(text);
-            restartRecognition();
-        }
-    }, FORCE_FINALIZE_STABLE_MS);
-}
-function cancelStabilityTimer() {
-    if (stabilityTimer) {
-        clearTimeout(stabilityTimer);
-        stabilityTimer = null;
-    }
-}
-
-// Stops the recognizer and lets onend auto-restart it. This clears the
-// recognizer's internal interim transcript so we don't have to track
-// consumed prefixes ourselves.
-let restartingForFinalize = false;
-function restartRecognition() {
-    if (!recognition || !isListening || restartingForFinalize) return;
-    restartingForFinalize = true;
-    try {
-        recognition.stop();
-    } catch (e) { /* ignore */ }
-    // restartingForFinalize will be cleared on next onstart
 }
 
 // ============== Handle a finalized speech segment ==============
@@ -512,7 +456,6 @@ els.btnToggle.addEventListener('click', async () => {
         playStopSound();
         isStoppingIntentionally = true;
         cancelInterimTranslation();
-        cancelStabilityTimer();
         recognition.stop();
     } else {
         // Start
