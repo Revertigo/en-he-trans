@@ -3,6 +3,7 @@
 
 const TRANSLATE_WORKER_URL = 'https://en-he-translator.dekel241.workers.dev';
 const LOG_ENDPOINT = TRANSLATE_WORKER_URL + '/log';
+const WARMUP_ENDPOINT = TRANSLATE_WORKER_URL + '/warmup';
 const MAX_HISTORY = 12;
 const CURRENT_WINDOW_SIZE = 3;  // max lines shown in the "current" card
 
@@ -537,6 +538,18 @@ els.btnClear.addEventListener('click', () => {
 
 // ============== Initialize ==============
 initRecognition();
+
+// Pre-warm the connection to the Cloudflare Worker so the first real
+// translation request doesn't pay the full TLS handshake + DNS lookup cost.
+// Fires immediately on page load. Safe: /warmup returns instantly without
+// calling the Google API, no cost, no rate limit concerns.
+(function preWarmWorker() {
+    try {
+        fetch(WARMUP_ENDPOINT, { method: 'GET', keepalive: true })
+            .then(() => dbg('WARMUP: ok'))
+            .catch((e) => dbg('WARMUP: failed ' + e.message));
+    } catch (e) { /* no-op */ }
+})();
 
 // Register service worker for PWA offline shell
 if ('serviceWorker' in navigator) {
