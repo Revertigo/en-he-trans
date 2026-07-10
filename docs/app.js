@@ -8,9 +8,13 @@ const MAX_HISTORY = 12;
 const CURRENT_WINDOW_SIZE = 3;  // max lines shown in the "current" card
 
 // ============== Feature flags ==============
-// Toggle this true/false to show/hide the on-screen debug overlay.
-// When false, dbg() becomes a no-op (no performance impact).
-const DEBUG_MODE = true;
+// SHOW_DEBUG_OVERLAY: show the on-screen debug box (the live event log overlay).
+//   Turn OFF for normal use — it covers part of the translation.
+// ENABLE_REPORTING: keep collecting log entries in memory AND show the
+//   "Send Report" button, so the user can send a diagnostic report to Discord
+//   even when the on-screen overlay is hidden.
+const SHOW_DEBUG_OVERLAY = false;
+const ENABLE_REPORTING = true;
 const DEBUG_BUFFER_SIZE = 200;  // entries kept for "Send Report"
 
 // ============== State ==============
@@ -43,27 +47,32 @@ const els = {
 };
 
 // ============== Feature flag: show/hide debug UI ==============
-if (!DEBUG_MODE) {
+// The on-screen overlay is controlled by SHOW_DEBUG_OVERLAY.
+// The Send Report button is controlled by ENABLE_REPORTING.
+if (!SHOW_DEBUG_OVERLAY) {
     if (els.debugBox) els.debugBox.style.display = 'none';
-    if (els.btnSendReport) els.btnSendReport.style.display = 'none';
-} else {
+}
+if (ENABLE_REPORTING) {
     if (els.btnSendReport) {
         els.btnSendReport.addEventListener('click', sendDebugReport);
     }
+} else {
+    if (els.btnSendReport) els.btnSendReport.style.display = 'none';
 }
 
 // ============== Debug helper ==============
-// Maintains a rolling buffer for "Send Report". Only renders the last few lines
-// in the on-screen overlay (when DEBUG_MODE is true).
+// Collects log entries into a rolling buffer whenever reporting OR the overlay
+// is enabled. Renders the last few lines into the overlay only when it's shown.
 const debugBuffer = [];      // full history for reports
 const ON_SCREEN_LINES = 8;
 function dbg(msg) {
-    if (!DEBUG_MODE) return;
+    // Skip all work only if both the overlay and reporting are off.
+    if (!SHOW_DEBUG_OVERLAY && !ENABLE_REPORTING) return;
     const t = new Date().toLocaleTimeString('he-IL', { hour12: false });
     const line = `[${t}] ${msg}`;
     debugBuffer.push(line);
     if (debugBuffer.length > DEBUG_BUFFER_SIZE) debugBuffer.shift();
-    if (els.debugBox) {
+    if (SHOW_DEBUG_OVERLAY && els.debugBox) {
         const tail = debugBuffer.slice(-ON_SCREEN_LINES).join('\n');
         els.debugBox.textContent = tail;
     }
