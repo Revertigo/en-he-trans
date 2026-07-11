@@ -44,7 +44,50 @@ const els = {
     tabContents: document.querySelectorAll('.tab-content'),
     debugBox: document.getElementById('debug-box'),
     btnSendReport: document.getElementById('btn-send-report'),
+    main: document.querySelector('main'),
 };
+
+// ============== Smart auto-scroll ==============
+// Keep the newest translation line in view as new lines arrive, BUT only when
+// the user hasn't scrolled away. If the user scrolls up (to re-read something),
+// auto-scroll pauses so we don't "fight" them. It resumes automatically once
+// the newest line is back in view.
+let autoScrollEnabled = true;
+let programmaticScroll = false;  // ignore scroll events we cause ourselves
+
+// Is the newest current-line at least partially visible within <main>'s viewport?
+function isNewestLineVisible() {
+    const activeTab = document.querySelector('.tab-content.active');
+    if (!activeTab || !els.main) return true;
+    const lines = activeTab.querySelectorAll('.current-line');
+    const newest = lines[lines.length - 1];
+    if (!newest) return true;
+    const mainRect = els.main.getBoundingClientRect();
+    const lineRect = newest.getBoundingClientRect();
+    // Any vertical overlap between the line and the viewport counts as visible.
+    return lineRect.top < mainRect.bottom && lineRect.bottom > mainRect.top;
+}
+
+function maybeAutoScroll() {
+    if (!autoScrollEnabled || !els.main) return;
+    const activeTab = document.querySelector('.tab-content.active');
+    if (!activeTab) return;
+    const lines = activeTab.querySelectorAll('.current-line');
+    const newest = lines[lines.length - 1];
+    if (newest) {
+        programmaticScroll = true;
+        newest.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        setTimeout(() => { programmaticScroll = false; }, 400);
+    }
+}
+
+if (els.main) {
+    els.main.addEventListener('scroll', () => {
+        if (programmaticScroll) return;  // ignore our own scrolling
+        // A manual scroll: resume auto-scroll only if the newest line is visible.
+        autoScrollEnabled = isNewestLineVisible();
+    });
+}
 
 // ============== Feature flag: show/hide debug UI ==============
 // The on-screen overlay is controlled by SHOW_DEBUG_OVERLAY.
@@ -395,6 +438,8 @@ function renderCurrent() {
     els.currentHebrew.innerHTML = hebrewLines
         .map(line => `<div class="current-line">${escapeHtml(line)}</div>`)
         .join('');
+
+    maybeAutoScroll();
 }
 
 // ============== Render history ==============
