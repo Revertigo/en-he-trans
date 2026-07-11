@@ -26,7 +26,7 @@ reach the browser.
 This file mirrors what runs in the Cloudflare Worker. To update the live Worker:
 
 1. Cloudflare dashboard → Workers & Pages → `en-he-translator` → Edit code
-2. Replace the contents with `worker.js`
+2. Replace the contents with `translate-proxy.js`
 3. Save and Deploy
 
 (The secrets are configured once under the Worker's Settings → Variables and
