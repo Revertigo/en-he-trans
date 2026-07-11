@@ -1,36 +1,56 @@
-# DriveTranslate
+# DriveTranslate Web App
 
-`DriveTranslate` is a native iPhone SwiftUI prototype for live ambient-audio transcription and translation.
+A Progressive Web App (PWA) version of DriveTranslate that runs in mobile Safari/Chrome — no install required.
 
-## MVP scope
+## Architecture
 
-- Listen through the iPhone microphone while spoken English audio plays in the environment.
-- Transcribe English speech live.
-- Translate the current English transcript to Hebrew.
-- Show two live tabs:
-  - `Hebrew`: live Hebrew translation plus recent Hebrew lines.
-  - `English`: live English transcription plus recent English lines.
-- Keep a lightweight rolling history of finalized transcript pairs on-device.
+```
+┌──────────────────────┐         ┌──────────────────────┐         ┌─────────────────────┐
+│   iPhone Browser     │  HTTPS  │  Cloudflare Worker   │  HTTPS  │ Google Cloud        │
+│                      │ ──────► │  (proxy + API key)   │ ──────► │ Translation API     │
+│ Web Speech API (STT) │ ◄────── │                      │ ◄────── │                     │
+│ Display Hebrew (RTL) │  JSON   │                      │  JSON   │                     │
+└──────────────────────┘         └──────────────────────┘         └─────────────────────┘
+```
 
-## Current implementation
+- **Web Speech API** (in-browser) handles English speech-to-text
+- **Cloudflare Worker** holds the Google API key and proxies translation requests
+- **Google Cloud Translation API** does EN→HE translation
+- **Debug logs** are sent on demand from the app to a **Discord channel** via a
+  webhook (through the Cloudflare Worker's `/log` endpoint), so diagnostic
+  reports can be reviewed off-device.
 
-This repository contains a hand-scaffolded Xcode project and the initial app architecture:
+## Files
 
-- SwiftUI app shell with Hebrew and English tabs
-- Shared `SessionStore` for live state
-- Apple Speech framework microphone transcription service
-- Translation bridge built around SwiftUI's `translationTask`
-- Setup screen for permissions and translation-preparation guidance
-- Mock transcript mode for simulator-style UI and state testing
+| File | Purpose |
+|------|---------|
+| `index.html` | Page structure: tabs, status, controls |
+| `app.js` | Main logic: speech recognition, translation, UI updates |
+| `style.css` | Dark theme, RTL Hebrew styling |
+| `manifest.json` | PWA installable metadata |
+| `service-worker.js` | Caches app shell for offline access |
+| `icon-192.png`, `icon-512.png` | App icons |
 
-## Important notes
+## Local testing
 
-- This app is designed for a real iPhone, not the simulator.
-- This workspace does not have Xcode or Apple SDK tooling, so the code was scaffolded but not compiled here.
-- The Speech and Translation APIs used here depend on device support, iOS version, and installed translation assets.
+You can't test microphone features over `file://` — browsers require HTTPS or localhost. To test locally:
 
-## Mock mode
+```bash
+cd web_app
+python3 -m http.server 8000
+```
 
-- The app automatically uses `Mock transcript` mode when it runs in the iOS Simulator.
-- On a real device, you can force the same behavior by adding the launch argument `--mock-mode` to the app scheme in Xcode.
-- Mock mode simulates incoming English transcript lines and uses a lightweight fake Hebrew translation so the Hebrew and English screens can be tested without live microphone input.
+Then open `http://localhost:8000` on your computer. For mobile testing, deploy to GitHub Pages.
+
+## Deployment
+
+This is a static site. Push to GitHub and enable GitHub Pages:
+
+1. Push the `web_app` branch to GitHub
+2. In repo settings → Pages → enable Pages for the `web_app` branch (or for `master` if merged)
+3. Wait ~1 minute for deployment
+4. Open the GitHub Pages URL on your iPhone
+
+## Configuration
+
+The Cloudflare Worker URL is hardcoded in `app.js` as `TRANSLATE_WORKER_URL`. Change it there if you redeploy the Worker to a different URL.
