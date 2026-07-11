@@ -107,6 +107,57 @@ main {
     word-wrap: break-word;
 }
 
+.current-line {
+    padding: 6px 0;
+    border-bottom: 1px dashed #0f3460;
+}
+
+.current-line:last-child {
+    border-bottom: none;
+}
+
+/* The live (in-progress) interim line — highlighted green. */
+.current-line.live {
+    color: #0f9;
+}
+
+.debug-box {
+    position: fixed;
+    bottom: 80px;
+    left: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #0f9;
+    font-family: monospace;
+    font-size: 11px;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid #0f9;
+    max-height: 100px;
+    overflow-y: auto;
+    z-index: 9999;
+    white-space: pre-wrap;
+    pointer-events: none;
+}
+
+.btn-debug-report {
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 8px;
+    background: #0f3460;
+    color: #0f9;
+    border: 1px solid #0f9;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 14px;
+    font-family: monospace;
+    cursor: pointer;
+}
+.btn-debug-report:active {
+    background: #0f9;
+    color: #0a0a1a;
+}
+
 .live-text.rtl {
     text-align: right;
     font-family: 'SF Hebrew', 'Arial Hebrew', sans-serif;
