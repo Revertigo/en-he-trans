@@ -21,11 +21,13 @@ const DEBUG_BUFFER_SIZE = 200;  // entries kept for "Send Report"
 let recognition = null;
 let isListening = false;
 let isStoppingIntentionally = false;
-// Sliding window of recent finalized sentences (oldest first, newest last).
-// englishWindow[i] corresponds to hebrewWindow[i].
-let englishWindow = [];
-let hebrewWindow = [];
-// Interim (in-progress) sentence — shown as the bottom line, gets replaced when finalized.
+// Sliding window of recent FINALIZED segments (oldest first, newest last).
+// Each element is an object { english, hebrew } so async translation can update
+// the correct entry by reference even if it's already been rendered or evicted.
+let windowSegments = [];
+// The live in-progress line (what is being heard right now). Rendered as the
+// green bottom line, SEPARATE from the finalized window so it never hides the
+// most recent finalized line.
 let interimEnglish = '';
 let interimHebrew = '';
 let historySegments = [];  // {english, hebrew}
@@ -123,7 +125,7 @@ function dbg(msg) {
 }
 
 async function sendDebugReport() {
-    if (!debugBuffer.length && englishWindow.length === 0 && historySegments.length === 0) {
+    if (!debugBuffer.length && windowSegments.length === 0 && historySegments.length === 0) {
         if (els.btnSendReport) {
             els.btnSendReport.textContent = '∅';
             setTimeout(() => { els.btnSendReport.textContent = '📤'; }, 1500);
@@ -139,9 +141,8 @@ async function sendDebugReport() {
     const version = document.querySelector('.version')?.textContent || 'unknown';
 
     // Snapshot of what the user currently sees on screen.
-    const windowSnapshot = englishWindow.map((en, i) => {
-        const he = hebrewWindow[i] || '';
-        return `  [${i}] EN: ${en}\n      HE: ${he}`;
+    const windowSnapshot = windowSegments.map((s, i) => {
+        return `  [${i}] EN: ${s.english}\n      HE: ${s.hebrew}`;
     }).join('\n');
     const interimSnapshot = interimEnglish
         ? `  [interim] EN: ${interimEnglish}\n            HE: ${interimHebrew || '...'}`
@@ -152,7 +153,7 @@ async function sendDebugReport() {
 
     const header = `=== Report ${new Date().toISOString()} ===\nVersion: ${version}\nUA: ${userAgent}\n`;
     const part1 = `--- EVENT LOG (${debugBuffer.length} entries) ---\n${debugBuffer.join('\n') || '(empty)'}\n`;
-    const part2 = `--- CURRENT WINDOW (${englishWindow.length}/${CURRENT_WINDOW_SIZE}) ---\n${windowSnapshot || '(empty)'}\n${interimSnapshot}\n`;
+    const part2 = `--- CURRENT WINDOW (${windowSegments.length}/${CURRENT_WINDOW_SIZE}) ---\n${windowSnapshot || '(empty)'}\n${interimSnapshot}\n`;
     const part3 = `--- HISTORY (${historySegments.length}) ---\n${historySnapshot || '(empty)'}\n`;
     const fullMessage = header + part1 + part2 + part3;
 
@@ -370,74 +371,71 @@ function cancelInterimTranslation() {
 
 // ============== Handle a finalized speech segment ==============
 async function handleFinalSegment(englishSegment) {
-    // Show the new sentence in the bottom slot as interim with a "translating" placeholder.
-    interimEnglish = englishSegment;
-    interimHebrew = '...';
-    renderCurrent();
+    // Create the segment object and push it into the window IMMEDIATELY, in
+    // arrival order, with a placeholder Hebrew. Keeping a reference means the
+    // async translation below updates THIS exact line — even if it's already
+    // rendered, or later evicted into history, or if translations complete
+    // out of order relative to other segments.
+    const seg = { english: englishSegment, hebrew: '…' };
+    windowSegments.push(seg);
+    dbg(`PUSH win=${windowSegments.length} hist=${historySegments.length}`);
 
+    // Evict oldest to history if the window is over capacity.
+    while (windowSegments.length > CURRENT_WINDOW_SIZE) {
+        const evicted = windowSegments.shift();
+        historySegments.unshift(evicted);
+        if (historySegments.length > MAX_HISTORY) {
+            historySegments = historySegments.slice(0, MAX_HISTORY);
+        }
+        dbg(`EVICT to hist. win=${windowSegments.length} hist=${historySegments.length}`);
+    }
+
+    // The just-finalized text is no longer "in progress" — clear the interim
+    // line so the green line reflects only genuinely live speech.
+    interimEnglish = '';
+    interimHebrew = '';
+
+    renderCurrent();
+    renderHistory();
+
+    // Translate asynchronously and update this segment by reference.
     try {
         const hebrew = await translate(englishSegment);
-
-        // Append the finalized pair to the sliding window
-        englishWindow.push(englishSegment);
-        hebrewWindow.push(hebrew);
-        dbg(`PUSH win=${englishWindow.length} hist=${historySegments.length}`);
-
-        // If window exceeded capacity, push oldest into history
-        while (englishWindow.length > CURRENT_WINDOW_SIZE) {
-            const evictedEn = englishWindow.shift();
-            const evictedHe = hebrewWindow.shift();
-            historySegments.unshift({ english: evictedEn, hebrew: evictedHe });
-            if (historySegments.length > MAX_HISTORY) {
-                historySegments = historySegments.slice(0, MAX_HISTORY);
-            }
-            dbg(`EVICT to hist. win=${englishWindow.length} hist=${historySegments.length}`);
-        }
-
-        // Clear interim — the sentence is now in the window
-        interimEnglish = '';
-        interimHebrew = '';
-
-        renderCurrent();
-        renderHistory();
+        seg.hebrew = hebrew;
     } catch (err) {
-        interimHebrew = '[Translation error]';
-        renderCurrent();
-        setStatus(`Translation failed: ${err.message}`, 'error');
-        setTimeout(() => {
-            if (isListening) setStatus('Listening...', 'listening');
-        }, 3000);
+        seg.hebrew = '[translation error]';
     }
+    renderCurrent();
+    renderHistory();
 }
 
-// ============== Render current (sliding window of up to 3 lines) ==============
+// ============== Render current view ==============
+// Layout (top → bottom):
+//   [ up to CURRENT_WINDOW_SIZE finalized lines, oldest → newest ]
+//   [ live interim line, highlighted green ]  ← only if speech is in progress
+// The interim line is ALWAYS separate from the finalized lines, so the most
+// recent finalized line is never hidden.
 function renderCurrent() {
-    const englishLines = [...englishWindow];
-    const hebrewLines = [...hebrewWindow];
+    const enLines = windowSegments.map(s => ({ text: s.english, live: false }));
+    const heLines = windowSegments.map(s => ({ text: s.hebrew, live: false }));
 
     if (interimEnglish) {
-        // Option Y: interim replaces the bottom slot (max 3 visible lines).
-        if (englishLines.length >= CURRENT_WINDOW_SIZE) {
-            englishLines[CURRENT_WINDOW_SIZE - 1] = interimEnglish;
-            hebrewLines[CURRENT_WINDOW_SIZE - 1] = interimHebrew || '...';
-        } else {
-            englishLines.push(interimEnglish);
-            hebrewLines.push(interimHebrew || '...');
-        }
+        enLines.push({ text: interimEnglish, live: true });
+        heLines.push({ text: interimHebrew || '…', live: true });
     }
 
-    if (englishLines.length === 0) {
+    if (enLines.length === 0) {
         els.currentEnglish.textContent = 'Start listening to see the live transcript';
         els.currentHebrew.textContent = 'התחל האזנה כדי לראות תרגום חי';
         return;
     }
 
-    els.currentEnglish.innerHTML = englishLines
-        .map(line => `<div class="current-line">${escapeHtml(line)}</div>`)
+    const renderLines = (arr) => arr
+        .map(l => `<div class="current-line${l.live ? ' live' : ''}">${escapeHtml(l.text)}</div>`)
         .join('');
-    els.currentHebrew.innerHTML = hebrewLines
-        .map(line => `<div class="current-line">${escapeHtml(line)}</div>`)
-        .join('');
+
+    els.currentEnglish.innerHTML = renderLines(enLines);
+    els.currentHebrew.innerHTML = renderLines(heLines);
 
     maybeAutoScroll();
 }
@@ -525,8 +523,7 @@ els.btnToggle.addEventListener('click', async () => {
 
 els.btnClear.addEventListener('click', () => {
     historySegments = [];
-    englishWindow = [];
-    hebrewWindow = [];
+    windowSegments = [];
     interimEnglish = '';
     interimHebrew = '';
     renderCurrent();

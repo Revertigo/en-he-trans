@@ -114,6 +114,10 @@ main {
 
 .current-line:last-child {
     border-bottom: none;
+}
+
+/* The live (in-progress) interim line — highlighted green. */
+.current-line.live {
     color: #0f9;
 }
 
