@@ -82,12 +82,12 @@ function dbg(msg) {
 async function sendDebugReport() {
     if (!debugBuffer.length && englishWindow.length === 0 && historySegments.length === 0) {
         if (els.btnSendReport) {
-            els.btnSendReport.textContent = '(empty)';
-            setTimeout(() => { els.btnSendReport.textContent = '📤 Send Report'; }, 1500);
+            els.btnSendReport.textContent = '∅';
+            setTimeout(() => { els.btnSendReport.textContent = '📤'; }, 1500);
         }
         return;
     }
-    const originalText = '📤 Send Report';
+    const originalText = '📤';
     if (els.btnSendReport) {
         els.btnSendReport.disabled = true;
         els.btnSendReport.textContent = '⏳ Sending...';
